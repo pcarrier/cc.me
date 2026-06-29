@@ -2013,8 +2013,13 @@ async fn load_stats(state: &AppState) -> AppResult<StatsResponse> {
         )
         .await?,
         aliases: count_total(&state.db, StatKind::Alias, StatPeriod::Hour, &hour_buckets).await?,
-        forwarded: count_total(&state.db, StatKind::Forward, StatPeriod::Hour, &hour_buckets)
-            .await?,
+        forwarded: count_total(
+            &state.db,
+            StatKind::Forward,
+            StatPeriod::Hour,
+            &hour_buckets,
+        )
+        .await?,
     };
     let last_30_days = StatCounts {
         redirects: count_total(&state.db, StatKind::Redirect, StatPeriod::Day, &day_buckets)

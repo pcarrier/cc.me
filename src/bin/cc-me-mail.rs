@@ -36,7 +36,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .next()
         .or_else(|| env::var("SENDER").ok())
         .filter(|value| !value.is_empty())
-        .or_else(|| Headers::parse(&message).get("from").and_then(extract_address));
+        .or_else(|| {
+            Headers::parse(&message)
+                .get("from")
+                .and_then(extract_address)
+        });
 
     let local = rcpt
         .rsplit_once('@')
@@ -51,6 +55,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
         "hi" => handle_login(sender.as_deref(), &config).await,
         _ => handle_alias(&message, &local, sender.as_deref(), &config).await,
     }
+}
+
+fn is_mailer_daemon(sender: &str) -> bool {
+    sender
+        .rsplit_once('@')
+        .map(|(local, _)| local)
+        .unwrap_or(sender)
+        .eq_ignore_ascii_case("mailer-daemon")
 }
 
 struct Config {
@@ -111,14 +123,20 @@ fn build_echo_reply(
     let Some(sender) = sender else {
         return Ok(None);
     };
-    if sender == "<>" || is_auto_submitted(&headers) || is_bulkish(&headers) {
+    if sender == "<>"
+        || is_mailer_daemon(&sender)
+        || is_auto_submitted(&headers)
+        || is_bulkish(&headers)
+    {
         return Ok(None);
     }
 
     let subject = reply_subject(headers.get("subject").as_deref(), &config.echo_from);
     let date = OffsetDateTime::now_utc().format(&Rfc2822)?;
     let message_id = reply_message_id(message, &config.host);
-    let original_message_id = headers.get("message-id").map(|value| clean_one_line(&value));
+    let original_message_id = headers
+        .get("message-id")
+        .map(|value| clean_one_line(&value));
 
     let mut reply = String::new();
     push_header(&mut reply, "From", &config.echo_from);
@@ -151,8 +169,10 @@ fn build_echo_reply(
 // --- login -----------------------------------------------------------------
 
 async fn handle_login(sender: Option<&str>, config: &Config) -> Result<(), Box<dyn Error>> {
-    let sender = sender.filter(|value| !value.is_empty()).ok_or("sender is required")?;
-    if sender == "<>" {
+    let sender = sender
+        .filter(|value| !value.is_empty())
+        .ok_or("sender is required")?;
+    if sender == "<>" || is_mailer_daemon(sender) {
         return Ok(());
     }
     let pool = config.pool().await?;
@@ -191,7 +211,11 @@ async fn create_magic_link(
         .await?;
 
         if inserted.rows_affected() == 1 {
-            return Ok(format!("{}/hi#code={}", public_url.trim_end_matches('/'), token));
+            return Ok(format!(
+                "{}/hi#code={}",
+                public_url.trim_end_matches('/'),
+                token
+            ));
         }
     }
 
@@ -308,7 +332,12 @@ fn smtp_submit(addr: &str, from: &str, rcpt: &str, message: &str) -> Result<(), 
 
     expect(&mut reader, b'2')?; // greeting
     cmd(&mut writer, &mut reader, "EHLO cc.me", b'2')?;
-    cmd(&mut writer, &mut reader, &format!("MAIL FROM:<{from}>"), b'2')?;
+    cmd(
+        &mut writer,
+        &mut reader,
+        &format!("MAIL FROM:<{from}>"),
+        b'2',
+    )?;
     cmd(&mut writer, &mut reader, &format!("RCPT TO:<{rcpt}>"), b'2')?;
     cmd(&mut writer, &mut reader, "DATA", b'3')?;
     writer.write_all(dot_stuffed(message).as_bytes())?;
@@ -564,5 +593,21 @@ mod tests {
         );
         assert!(looks_like_address("a@b.co"));
         assert!(!looks_like_address("not-an-address"));
+    }
+
+    #[test]
+    fn echo_and_login_ignore_mailer_daemon() {
+        assert!(is_mailer_daemon("mailer-daemon@horse"));
+        assert!(is_mailer_daemon("MAILER-DAEMON@example.com"));
+        assert!(!is_mailer_daemon("hi@cc.me"));
+        assert!(
+            build_echo_reply(
+                "From: Mailer-Daemon <mailer-daemon@horse>\n\nHi\n",
+                Some("mailer-daemon@horse"),
+                &config(),
+            )
+            .unwrap()
+            .is_none()
+        );
     }
 }
