@@ -1,2 +1,5 @@
 #!/usr/bin/env sh
-exec xmit www.cc.me docs
+set -eux
+cargo build --release
+rsync -avP target/release/cc-me{,-mail} horse:
+ssh horse sh -c "'doas systemctl stop cc-me; doas cp cc-me cc-me-mail /usr/local/bin/; doas systemctl start cc-me'"

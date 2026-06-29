@@ -225,7 +225,7 @@ function setLoggedOut() {
   linksSection.classList.add("hidden");
   logoutButton.classList.add("hidden");
   status.className = "status";
-  statusText.innerHTML = `Logged out. E-mail <a href="mailto:hi@cc.me">hi@cc.me</a> to log in.`;
+  statusText.innerHTML = `<a href="mailto:hi@cc.me">Send an empty E-mail to hi@cc.me</a> &amp; we'll reply with a magic link.`;
 }
 
 function setSignedIn() {
@@ -238,6 +238,8 @@ logoutButton.onclick = () => {
   try { localStorage.removeItem(STORAGE_KEY); } catch (error) {}
   key = null;
   setLoggedOut();
+
+  //
 };
 
 async function setAliasExpiry(alias, expiresAtUnix) {
